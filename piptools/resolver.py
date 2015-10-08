@@ -1,14 +1,15 @@
 # coding: utf-8
-from __future__ import (absolute_import, division, print_function)
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 
 import os
 from functools import partial
 from itertools import chain, count
 
-from . import click
 from first import first
 from pip.req import InstallRequirement
 
+from . import click
 from .cache import DependencyCache
 from .exceptions import UnsupportedConstraint
 from .logging import log
@@ -64,7 +65,7 @@ class Resolver(object):
         self._check_constraints()
 
         # TODO: Is there a better way to do this?
-        os.environ['PIP_EXISTS_ACTION'] = 'i'  # ignore existing packages
+        os.environ['PIP_EXISTS_ACTION'] = b'i'  # ignore existing packages
         for current_round in count(start=1):
             if current_round > max_rounds:
                 raise RuntimeError('No stable configuration of concrete packages '
