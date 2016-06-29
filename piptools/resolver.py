@@ -8,6 +8,7 @@ from itertools import chain, count
 
 from first import first
 from pip.req import InstallRequirement
+from pip.vcs import vcs
 
 from . import click
 from .cache import DependencyCache
@@ -94,10 +95,17 @@ class Resolver(object):
 
     def _check_constraints(self):
         for constraint in chain(self.our_constraints, self.their_constraints):
-            if constraint.link is not None and not constraint.editable:
-                msg = ('pip-compile does not support URLs as packages, unless they are editable. '
-                       'Perhaps add -e option?')
-                raise UnsupportedConstraint(msg, constraint)
+            if constraint.link and constraint.link.scheme not in vcs.all_schemes:
+                msg = ('pip-compile does not support artifact URLs as packages'
+                       ' (but you can use VCS URLs).')
+            elif constraint.extras:
+                msg = ('pip-compile does not yet support packages with extras. '
+                       'Support for this is in the works, though.')
+            else:
+                continue
+
+            msg += ' Constraint: {0}.'.format(str(constraint))
+            raise UnsupportedConstraint(msg)
 
     def _group_constraints(self, constraints):
         """
@@ -189,11 +197,7 @@ class Resolver(object):
             Flask==0.10.1 => Flask==0.10.1
 
         """
-        if ireq.editable:
-            # NOTE: it's much quicker to immediately return instead of
-            # hitting the index server
-            best_match = ireq
-        elif is_pinned_requirement(ireq):
+        if ireq.editable or ireq.link or is_pinned_requirement(ireq):
             # NOTE: it's much quicker to immediately return instead of
             # hitting the index server
             best_match = ireq
@@ -214,12 +218,12 @@ class Resolver(object):
         Editable requirements will never be looked up, as they may have
         changed at any time.
         """
-        if ireq.editable:
+        if ireq.editable or ireq.link:
             for dependency in self.repository.get_dependencies(ireq):
                 yield dependency
             return
         elif not is_pinned_requirement(ireq):
-            raise TypeError('Expected pinned or editable requirement, got {}'.format(ireq))
+            raise TypeError('Expected pinned or editable requirement, or link, got {}'.format(ireq))
 
         # Now, either get the dependencies from the dependency cache (for
         # speed), or reach out to the external repository to
@@ -238,5 +242,6 @@ class Resolver(object):
             yield InstallRequirement.from_line(dependency_string)
 
     def reverse_dependencies(self, ireqs):
-        non_editable = [ireq for ireq in ireqs if not ireq.editable]
-        return self.dependency_cache.reverse_dependencies(non_editable)
+        tups = (as_name_version_tuple(ireq) for ireq in ireqs
+                if not (ireq.editable or ireq.link))
+        return self.dependency_cache.reverse_dependencies(tups)
