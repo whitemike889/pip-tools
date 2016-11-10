@@ -4,6 +4,7 @@ from __future__ import (absolute_import, division, print_function,
 
 import optparse
 import os
+import re
 import sys
 import tempfile
 
@@ -50,7 +51,8 @@ class PipCommand(pip.basecommand.Command):
               help="Annotate results, indicating where dependencies come from")
 @click.option('-U', '--upgrade', is_flag=True, default=False,
               help='Try to upgrade all dependencies to their latest versions')
-@click.option('-P', '--upgrade-package', nargs=1, multiple=True, help="Specify particular packages to upgrade.")
+@click.option('-P', '--upgrade-package', nargs=1, multiple=True,
+              help="Specify particular packages to upgrade.")
 @click.option('-o', '--output-file', nargs=1, type=str, default=None,
               help=('Output file name. Required if more than one input file is given. '
                     'Will be derived from input file otherwise.'))
@@ -70,20 +72,24 @@ def cli(verbose, dry_run, pre, rebuild, find_links, index_url, extra_index_url,
     if len(src_files) == 1 and src_files[0] == '-':
         if not output_file:
             raise click.BadParameter('--output-file is required if input is from stdin')
-        if upgrade_package:
-            raise click.BadParameter('upgrade_package does not support input from stdin.')
 
     if len(src_files) > 1 and not output_file:
         raise click.BadParameter('--output-file is required if two or more input files are given.')
-
-    if upgrade and upgrade_package:
-        raise click.BadParameter('Only one of --upgrade or --upgrade_package can be provided as an argument.')
 
     if output_file:
         dst_file = output_file
     else:
         base_name, _, _ = src_files[0].rpartition('.')
         dst_file = base_name + '.txt'
+
+    if upgrade and upgrade_package:
+        raise click.BadParameter('Only one of --upgrade or --upgrade_package can be provided as an argument.')
+
+    # Process the arguments to upgrade-package into name and version pairs.
+    upgrade_package_reqs = [
+        package.split('==') if '==' in package else (package, None)
+        for package in upgrade_package
+    ]
 
     ###
     # Setup
@@ -131,11 +137,10 @@ def cli(verbose, dry_run, pre, rebuild, find_links, index_url, extra_index_url,
             if is_pinned_requirement(ireq):
                 existing_pins[name_from_req(ireq.req).lower()] = ireq
 
-        if upgrade_package:
-            for package in upgrade_package:
-                if package not in existing_pins:
-                    log.error("Asked to upgrade %s but it's not already pinned. Quitting..." % package)
-                    sys.exit(2)
+        for package, _ in upgrade_package_reqs:
+            if package not in existing_pins:
+                log.error("Asked to upgrade %s but it's not present in existing requirements. Quitting..." % package)
+                sys.exit(2)
 
         repository = local_repository = LocalRequirementsRepository(existing_pins, repository)
 
@@ -175,7 +180,9 @@ def cli(verbose, dry_run, pre, rebuild, find_links, index_url, extra_index_url,
 
         # pip requires filenames, not files.
         with tempfile.NamedTemporaryFile() as tmpfile:
-            tmpfile.write(str.encode('\n'.join(upgrade_package)))
+            for package, version in upgrade_package_reqs:
+                line = '{}\n'.format(package) if not version else '{}=={}\n'.format(package, version)
+                tmpfile.write(str.encode(line))
             tmpfile.flush()
 
             upgrade_candidates = list(
@@ -188,10 +195,13 @@ def cli(verbose, dry_run, pre, rebuild, find_links, index_url, extra_index_url,
                               .format(candidate.req.key))
                     sys.exit(2)
 
-                # we only want to process upgrades if the requirement is not pinned in the source file
                 constraint_candidate = existing_constraints[candidate.req.key]
-                if not constraint_candidate.req.specifier:
-                    upgraded_requirements[candidate.req.key] = constraint_candidate
+                if constraint_candidate.req.specifier:
+                    log.error("Asked to upgrade {} but it's pinned to a version in the source file. Quitting..."
+                              .format(candidate.req.key))
+                    sys.exit(2)
+                else:
+                    upgraded_requirements[candidate.req.key] = candidate
 
         existing_requirements.update(upgraded_requirements)
         constraints = existing_requirements.values()
