@@ -4,7 +4,6 @@ from __future__ import (absolute_import, division, print_function,
 
 import optparse
 import os
-import re
 import sys
 import tempfile
 
@@ -83,7 +82,7 @@ def cli(verbose, dry_run, pre, rebuild, find_links, index_url, extra_index_url,
         dst_file = base_name + '.txt'
 
     if upgrade and upgrade_package:
-        raise click.BadParameter('Only one of --upgrade or --upgrade_package can be provided as an argument.')
+        raise click.BadParameter('Only one of --upgrade or --upgrade-package can be provided as an argument.')
 
     # Process the arguments to upgrade-package into name and version pairs.
     upgrade_package_reqs = [
@@ -126,11 +125,14 @@ def cli(verbose, dry_run, pre, rebuild, find_links, index_url, extra_index_url,
     pip_options, _ = pip_command.parse_args(pip_args)
 
     session = pip_command._build_session(pip_options)
+
     repository = live_repository = PyPIRepository(pip_options, session)
+    local_repository = None
+    use_local_repo = not upgrade and os.path.exists(dst_file)
 
     # Proxy with a LocalRequirementsRepository if --upgrade is not specified
     # (= default invocation)
-    if not upgrade and os.path.exists(dst_file):
+    if use_local_repo:
         existing_pins = dict()
         ireqs = parse_requirements(dst_file, finder=repository.finder, session=repository.session, options=pip_options)
         for ireq in ireqs:
@@ -157,14 +159,15 @@ def cli(verbose, dry_run, pre, rebuild, find_links, index_url, extra_index_url,
     ###
     # Parsing/collecting initial requirements
     ###
+
     constraints = []
-    repository = live_repository if upgrade else local_repository
+    repository = local_repository if use_local_repo else live_repository
     for src_file in src_files:
         if src_file == '-':
             # pip requires filenames and not files. Since we want to support
             # piping from stdin, we need to briefly save the input from stdin
             # to a temporary file and have pip read that.
-            with tempfile.NamedTemporaryFile() as tmpfile:
+            with tempfile.NamedTemporaryFile(mode='wt') as tmpfile:
                 tmpfile.write(sys.stdin.read())
                 tmpfile.flush()
                 constraints.extend(parse_requirements(
@@ -179,10 +182,10 @@ def cli(verbose, dry_run, pre, rebuild, find_links, index_url, extra_index_url,
         upgraded_requirements = {}
 
         # pip requires filenames, not files.
-        with tempfile.NamedTemporaryFile() as tmpfile:
+        with tempfile.NamedTemporaryFile(mode='wt') as tmpfile:
             for package, version in upgrade_package_reqs:
                 line = '{}\n'.format(package) if not version else '{}=={}\n'.format(package, version)
-                tmpfile.write(str.encode(line))
+                tmpfile.write(line)
             tmpfile.flush()
 
             upgrade_candidates = list(
@@ -207,7 +210,7 @@ def cli(verbose, dry_run, pre, rebuild, find_links, index_url, extra_index_url,
         constraints = existing_requirements.values()
 
     try:
-        repository = live_repository if upgrade or upgrade_package else local_repository
+        repository = local_repository if use_local_repo and not upgrade_package else live_repository
         resolver = Resolver(constraints, repository, prereleases=pre, clear_caches=rebuild)
         results = resolver.resolve()
     except PipToolsError as e:
