@@ -179,6 +179,8 @@ def cli(verbose, dry_run, pre, rebuild, find_links, index_url, extra_index_url,
             constraints.extend(parse_requirements(
                 src_file, finder=repository.finder, session=repository.session, options=pip_options))
 
+    # remove duplicate index urls from parsed file
+    repository.finder.index_urls = list(OrderedDict.fromkeys(repository.finder.index_urls))
     if upgrade_package:
         existing_constraints = {c.req.key: c for c in constraints}
         existing_requirements = existing_pins
