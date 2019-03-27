@@ -5,7 +5,7 @@ from setuptools import find_packages, setup
 
 setup(
     name='pip-tools',
-    version='1.7.1a2',
+    version='1.7.2-rc.1',
     url='https://github.com/nvie/pip-tools/',
     license='BSD',
     author='Vincent Driessen',
